@@ -92,7 +92,7 @@ def main(config_path: str):
         elif isinstance(action, str) and action.strip():
             result = sandbox.run(_format_sandbox_command(action))
 
-        expl = explain(inp, plan, crit, persona.system_prompt, P_explain, engine_a, gen)
+        expl = explain(inp, plan, crit, neutral.system_prompt, P_explain, engine_a, gen)
 
         # memory gate (stub)
         stored = should_store(
