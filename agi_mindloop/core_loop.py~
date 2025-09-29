@@ -1,0 +1,101 @@
+from pathlib import Path
+from agi_mindloop.config import load_config, GenDefaults
+from agi_mindloop.io_mod.interface import Interface
+from agi_mindloop.io_mod.telemetry import log
+from agi_mindloop.llm.engine import StubEngine, GenOptions
+from agi_mindloop.llm import EngineBundle
+from agi_mindloop.personas.persona import PersonaRegistry
+from agi_mindloop.prompts import PromptLoader
+from agi_mindloop.cognition.planner import make_plan
+from agi_mindloop.cognition.self_critic import critique
+from agi_mindloop.cognition.explainer import explain
+from agi_mindloop.action.decider import choose_action
+from agi_mindloop.action.experimenter import Sandbox
+from agi_mindloop.memory.debate_gate import should_store
+from agi_mindloop.training.curate_debate import curate_if_needed
+
+
+def main(config_path: str):
+    cfg = load_config(config_path)
+    iface = Interface()
+
+    # Engines (stub for now)
+    engine_a = StubEngine("neutral_a")
+    engine_b = StubEngine("mooded_b")
+
+    # Wrap engines in a bundle
+    engines = EngineBundle(neutral_a=engine_a, mooded_b=engine_b)
+
+    # Personas
+    preg = PersonaRegistry(Path(cfg.persona.dir))
+    neutral = preg.load("Neutral")
+    persona = preg.load(cfg.persona.current)
+
+    # Prompts
+    pl = PromptLoader(cfg.prompts.dir)
+    P_plan = pl.load("planner")
+    P_critic = pl.load("critic")
+    P_explain = pl.load("explainer")
+    P_judge = pl.load("judge")
+
+    gen = GenOptions(**cfg.gen.__dict__)
+    pool = []
+
+    # Initialize sandbox once
+    sandbox = Sandbox(allowlist=["ls", "echo"])  # adjust allowlist as needed
+
+    for cycle in range(cfg.runtime.cycles):
+        log("cycle.start", id=cycle)
+
+        inp = iface.get_input()
+        recall = "(stub recall)"
+
+        plan = make_plan(inp, recall, persona.system_prompt, P_plan, engine_b, gen)
+        crit = critique(plan, persona.system_prompt, P_critic, engine_b, gen)
+
+        action = choose_action(
+            [f"do:{inp}"],
+            context=inp,
+            persona_sys=persona.system_prompt,
+            neutral_sys=neutral.system_prompt,
+            engines=engines,
+            gen=gen,
+            prompts=pl,
+            veto_risk=cfg.safety.veto_risk,
+        )
+
+        result = None
+        if action:
+            result = sandbox.run(action)
+
+        expl = explain(inp, plan, crit, persona.system_prompt, P_explain, engine_a, gen)
+
+        stored = should_store(
+            f"{inp}\n{plan}\n{crit}\n{result}",
+            neutral.system_prompt,
+            persona.system_prompt,
+            P_judge.system,
+            P_judge.user,
+            engine_a,
+            engine_b,
+            gen,
+            cfg.safety.veto_risk,
+        )
+        if stored:
+            pool.append(expl)
+
+        curate_if_needed(pool)
+
+        iface.send_output(
+            f"[cycle {cycle}] action={action} result={result['result'] if result else None}"
+        )
+        log("cycle.end", id=cycle)
+
+    return 0
+
+
+if __name__ == "__main__":
+    import sys
+    path = sys.argv[1] if len(sys.argv) > 1 else "config/config.yaml"
+    raise SystemExit(main(path))
+

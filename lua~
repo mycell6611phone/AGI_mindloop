@@ -1,0 +1,34 @@
+agi_mindloop/
+  __init__.py
+  core_loop.py
+  config.py
+  io/
+    __init__.py
+    interface.py
+    telemetry.py
+  llm/
+    __init__.py
+    engine.py
+  personas/
+    __init__.py
+    persona.py
+  prompts/
+    __init__.py
+  cognition/
+    __init__.py
+    planner.py
+    self_critic.py
+    explainer.py
+  action/
+    __init__.py
+    decider.py
+    experimenter.py
+  memory/
+    __init__.py
+    debate_gate.py
+  training/
+    __init__.py
+    curate_debate.py
+config/
+  config.yaml
+

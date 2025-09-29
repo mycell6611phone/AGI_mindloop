@@ -1,0 +1,14 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agi-mindloop"
+version = "0.1.0"
+description = "AGI Mindloop project"
+authors = [{name = "Justin Carrow"}]
+dependencies = ["pyyaml"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+
