@@ -1,8 +1,9 @@
 from pathlib import Path
+from typing import Optional
 from agi_mindloop.config import load_config, GenDefaults
 from agi_mindloop.io_mod.interface import Interface
 from agi_mindloop.io_mod.telemetry import log
-from agi_mindloop.llm.engine import StubEngine, GenOptions
+from agi_mindloop.llm.engine import Gpt4AllAPIEngine, GenOptions
 from agi_mindloop.llm import EngineBundle
 from agi_mindloop.personas.persona import PersonaRegistry
 from agi_mindloop.prompts import PromptLoader
@@ -34,11 +35,25 @@ def main(config_path: str):
     cfg = load_config(config_path)
     iface = Interface()
 
-    # Engines (stub for now)
-    engine_a = StubEngine("neutral_a")
-    engine_b = StubEngine("mooded_b")
-    engine_summarizer = StubEngine("summarizer")
-    engine_coder = StubEngine("coder")
+    def _model_name(models: Optional[object], key: str) -> str:
+        if not models:
+            return key
+        value = getattr(models, key, None)
+        if not value:
+            return key
+        try:
+            path = Path(value)
+            if path.name:
+                return path.name
+        except TypeError:
+            pass
+        return str(value)
+
+    # Engines: talk to the locally running GPT4All server
+    engine_a = Gpt4AllAPIEngine(_model_name(getattr(cfg, "models", None), "neutral_a"))
+    engine_b = Gpt4AllAPIEngine(_model_name(getattr(cfg, "models", None), "mooded_b"))
+    engine_summarizer = Gpt4AllAPIEngine(_model_name(getattr(cfg, "models", None), "summarizer"))
+    engine_coder = Gpt4AllAPIEngine(_model_name(getattr(cfg, "models", None), "coder"))
     engines = EngineBundle(
         neutral_a=engine_a,
         mooded_b=engine_b,

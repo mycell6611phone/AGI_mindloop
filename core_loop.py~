@@ -40,34 +40,33 @@ def main(config_path: str):
     # Initialize sandbox once
     sandbox = Sandbox(allowlist=["ls", "echo"])  # adjust allowlist as needed
 
-   for cycle in range(cfg.runtime.cycles):
-    log("cycle.start", id=cycle)
+    for cycle in range(cfg.runtime.cycles):
+        log("cycle.start", id=cycle)
 
-    inp = iface.get_input()
-    recall = "(stub recall)"
+        inp = iface.get_input()
+        recall = "(stub recall)"
 
-    # pass the StagePrompt object P_plan, not its .system/.user
-    plan = make_plan(inp, recall, persona.system_prompt, P_plan, engine_b, gen)
+        # pass the StagePrompt object P_plan, not its .system/.user
+        plan = make_plan(inp, recall, persona.system_prompt, P_plan, engine_b, gen)
 
-    crit = critique(plan, persona.system_prompt, P_critic, engine_b, gen)
+        crit = critique(plan, persona.system_prompt, P_critic, engine_b, gen)
 
-    action = choose_action(
-        [f"do:{inp}"],
-        context=inp,
-        persona_sys=persona.system_prompt,
-        neutral_sys=neutral.system_prompt,
-        engines={"neutral_a": engine_a, "mooded_b": engine_b},  # replace None
-        gen=gen,
-        prompts=pl,
-        veto_risk=cfg.safety.veto_risk,
-    )
+        action = choose_action(
+            [f"do:{inp}"],
+            context=inp,
+            persona_sys=persona.system_prompt,
+            neutral_sys=neutral.system_prompt,
+            engines={"neutral_a": engine_a, "mooded_b": engine_b},  # replace None
+            gen=gen,
+            prompts=pl,
+            veto_risk=cfg.safety.veto_risk,
+        )
 
-    result = None
-    if action:
-        result = sandbox.run(action)
+        result = None
+        if action:
+            result = sandbox.run(action)
 
-    expl = explain(inp, plan, crit, persona.system_prompt, P_explain, engine_a, gen)
-
+        expl = explain(inp, plan, crit, persona.system_prompt, P_explain, engine_a, gen)
 
         # memory gate (stub)
         stored = should_store(
