@@ -26,7 +26,13 @@ def build_engines(cfg: Config) -> EngineBundle:
         llama_cli = os.getenv("LLAMA_CLI", "./llama-cli")
         mk = lambda path: LlamaCppEngine(path, llama_cli=llama_cli)
     elif kind == "gpt4all":
-        from agi_mindloop.llm.adapters.gpt4all import Gpt4AllEngine
+        try:
+            from agi_mindloop.llm.adapters.gpt4all import Gpt4AllEngine
+        except ImportError as exc:
+            raise RuntimeError(
+                "The gpt4all engine was selected but the 'gpt4all' package is not available. "
+                "Install the gpt4all Python package to use this engine."
+            ) from exc
         mk = lambda path: Gpt4AllEngine(path)
     else:
         raise ValueError(f"unknown engine: {kind}")

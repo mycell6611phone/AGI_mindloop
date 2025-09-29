@@ -28,6 +28,18 @@ _DEFAULTS: dict[str, StagePrompt] = {
         system="Explain decisions clearly. Avoid fluff.",
         user="Summarize: input, plan, critique, and chosen action."
     ),
+    "evaluate": StagePrompt(
+        system=(
+            "You evaluate a proposed action for the current context. Respond with strict JSON "
+            "only containing label('ACCEPT'|'REJECT'), reason(≤30 words), utility(0..1), and "
+            "risk(0..1). Be concise and realistic."
+        ),
+        user=(
+            "Context:\n{context}\n\n"
+            "Action:\n{action}\n\n"
+            "Return only one JSON object."
+        ),
+    ),
     "judge": StagePrompt(
         system=("Decide ACCEPT or REJECT for memory storage. Respond in strict JSON.\n"
                 "Fields: label('ACCEPT'|'REJECT'), reason(str, ≤30 words), "

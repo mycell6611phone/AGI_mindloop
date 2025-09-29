@@ -1,6 +1,23 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+from importlib import resources
 import yaml
+
+
+def _package_root() -> Path:
+    package = resources.files("agi_mindloop")
+    try:
+        return Path(package)
+    except TypeError:
+        return Path(__file__).resolve().parent
+
+
+def _default_persona_dir() -> str:
+    return str(_package_root() / "personas")
+
+
+def _default_prompts_dir() -> str:
+    return str(_package_root() / "prompts")
 
 @dataclass
 class GenDefaults:
@@ -20,11 +37,11 @@ class Models:
 @dataclass
 class PersonaCfg:
     current: str = "Analytical"
-    dir: str = "./personas"
+    dir: str = field(default_factory=_default_persona_dir)
 
 @dataclass
 class PromptsCfg:
-    dir: str = "./prompts"
+    dir: str = field(default_factory=_default_prompts_dir)
     files: dict = None
 
 @dataclass

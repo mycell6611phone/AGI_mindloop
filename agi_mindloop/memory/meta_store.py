@@ -50,9 +50,13 @@ class MetaStore:
         return int(rid)
 
     def get_artifacts_text(self, ids: Iterable[int]) -> Dict[int, str]:
+        ids_list = list(ids)
+        if not ids_list:
+            return {}
+        placeholders = ",".join(["?"] * len(ids_list))
         rows = self.conn.execute(
-            f"SELECT id, content FROM artifacts WHERE id IN ({','.join(['?']*len(list(ids)))})",
-            list(ids)
+            f"SELECT id, content FROM artifacts WHERE id IN ({placeholders})",
+            tuple(ids_list),
         ).fetchall()
         return {int(i): c for i, c in rows}
 

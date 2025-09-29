@@ -18,9 +18,6 @@ class ActionDecision:
     risk_a: float
 
 def _eval(engine: Engine, system_text: str, eval_sys: str, eval_user: str, action: str, context: str, gen: GenOptions) -> dict:
-    # Debug: show what eval_user looks like before formatting
-    print("DEBUG eval_user template:", repr(eval_user))
-
     req = CompletionRequest(
         system=(system_text + "\n" + eval_sys).strip(),
         user=eval_user.format(action=action, context=context),
