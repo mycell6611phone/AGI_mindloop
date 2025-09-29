@@ -3,6 +3,7 @@ from agi_mindloop.config import load_config, GenDefaults
 from agi_mindloop.io_mod.interface import Interface
 from agi_mindloop.io_mod.telemetry import log
 from agi_mindloop.llm.engine import StubEngine, GenOptions
+from agi_mindloop.llm import EngineBundle
 from agi_mindloop.personas.persona import PersonaRegistry
 from agi_mindloop.prompts import PromptLoader
 from agi_mindloop.cognition.planner import make_plan
@@ -21,6 +22,14 @@ def main(config_path: str):
     # Engines (stub for now)
     engine_a = StubEngine("neutral_a")
     engine_b = StubEngine("mooded_b")
+    engine_summarizer = StubEngine("summarizer")
+    engine_coder = StubEngine("coder")
+    engines = EngineBundle(
+        neutral_a=engine_a,
+        mooded_b=engine_b,
+        summarizer=engine_summarizer,
+        coder=engine_coder,
+    )
 
     # Personas
     preg = PersonaRegistry(Path(cfg.persona.dir))
@@ -56,7 +65,7 @@ def main(config_path: str):
             context=inp,
             persona_sys=persona.system_prompt,
             neutral_sys=neutral.system_prompt,
-            engines={"neutral_a": engine_a, "mooded_b": engine_b},  # replace None
+            engines=engines,
             gen=gen,
             prompts=pl,
             veto_risk=cfg.safety.veto_risk,

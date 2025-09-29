@@ -2,8 +2,6 @@ import os, shutil
 from dataclasses import dataclass
 from agi_mindloop.config import Config
 from agi_mindloop.llm.engine import Engine
-from agi_mindloop.llm.adapters.llamaccp import LlamaCppEngine
-from agi_mindloop.llm.adapters.gpt4all import Gpt4AllEngine
 
 
 
@@ -24,9 +22,11 @@ def _choice(cfg: Config) -> str:
 def build_engines(cfg: Config) -> EngineBundle:
     kind = _choice(cfg)
     if kind == "llama.cpp":
+        from agi_mindloop.llm.adapters.llamaccp import LlamaCppEngine
         llama_cli = os.getenv("LLAMA_CLI", "./llama-cli")
         mk = lambda path: LlamaCppEngine(path, llama_cli=llama_cli)
     elif kind == "gpt4all":
+        from agi_mindloop.llm.adapters.gpt4all import Gpt4AllEngine
         mk = lambda path: Gpt4AllEngine(path)
     else:
         raise ValueError(f"unknown engine: {kind}")
