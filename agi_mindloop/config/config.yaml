@@ -1,4 +1,4 @@
-runtime: {cycles: 2, dry_run: true, seed: 42}
+runtime: {cycles: 10, dry_run: false, seed: 42}
 engine: llama.cpp
 llm: {gen_defaults: {temp: 0.6, top_p: 0.95, repeat_penalty: 1.1, max_tokens: 256, ctx: 4096}}
 models:
