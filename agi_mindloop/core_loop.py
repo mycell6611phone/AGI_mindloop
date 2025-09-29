@@ -11,8 +11,23 @@ from agi_mindloop.cognition.self_critic import critique
 from agi_mindloop.cognition.explainer import explain
 from agi_mindloop.action.decider import choose_action
 from agi_mindloop.action.experimenter import Sandbox
+from agi_mindloop.action.debate import ActionDecision
 from agi_mindloop.memory.debate_gate import should_store
 from agi_mindloop.training.curate_debate import curate_if_needed
+
+
+def _format_sandbox_command(action_text: str) -> str:
+    text = (action_text or "").strip()
+    if not text:
+        return text
+    if text.startswith(("sh:", "!")):
+        return text
+    return f"sh: {text}"
+
+
+def _execute_action_decision(action: ActionDecision, sandbox: Sandbox):
+    command = _format_sandbox_command(action.action)
+    return sandbox.run(command)
 
 
 def main(config_path: str):
@@ -72,8 +87,10 @@ def main(config_path: str):
         )
 
         result = None
-        if action:
-            result = sandbox.run(action)
+        if isinstance(action, ActionDecision):
+            result = _execute_action_decision(action, sandbox)
+        elif isinstance(action, str) and action.strip():
+            result = sandbox.run(_format_sandbox_command(action))
 
         expl = explain(inp, plan, crit, persona.system_prompt, P_explain, engine_a, gen)
 
@@ -95,7 +112,15 @@ def main(config_path: str):
         # training debate (stub)
         curate_if_needed(pool)
 
-        iface.send_output(f"[cycle {cycle}] action={action} result={result['result'] if result else None}")
+        result_summary = None
+        if isinstance(result, dict):
+            result_summary = result.get("stdout") or result.get("detail") or result.get("reason")
+            if result_summary is None:
+                result_summary = result
+        elif result is not None:
+            result_summary = result
+
+        iface.send_output(f"[cycle {cycle}] action={action} result={result_summary}")
         log("cycle.end", id=cycle)
 
     return 0
