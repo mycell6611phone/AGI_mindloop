@@ -97,7 +97,12 @@ def main(config_path: str):
     gen = GenOptions(**cfg.gen.__dict__)
     pool = []
 
-    sandbox = Sandbox(allowlist=["ls", "echo"])  # adjust allowlist as needed
+    sandbox = Sandbox(
+    allowlist=[
+        "ls", "echo", "cat", "python3", "pip", "mkdir", "touch"
+    ]
+)
+ # adjust allowlist as needed
 
     for cycle in range(cfg.runtime.cycles):
         log("cycle.start", id=cycle)

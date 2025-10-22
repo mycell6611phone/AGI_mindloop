@@ -6,9 +6,13 @@ build-backend = "setuptools.build_meta"
 name = "agi-mindloop"
 version = "0.1.0"
 description = "AGI Mindloop project"
-authors = [{name = "Justin Carrow"}]
+authors = [{ name = "Justin Carrow" }]
 dependencies = ["pyyaml"]
 
 [tool.setuptools.packages.find]
 where = ["."]
+
+[project.scripts]
+mindloop = "agi_mindloop.core_loop:cli"
+
 

@@ -16,6 +16,12 @@ from agi_mindloop.action.debate import ActionDecision
 from agi_mindloop.memory.debate_gate import should_store
 from agi_mindloop.training.curate_debate import curate_if_needed
 
+def cli():
+    """CLI entry point wrapper for mindloop command"""
+    from pathlib import Path
+    default_config = Path(__file__).resolve().parent.parent / "config" / "config.yaml"
+    return main(str(default_config))
+
 
 def _format_sandbox_command(action_text: str) -> str:
     text = (action_text or "").strip()
@@ -27,8 +33,14 @@ def _format_sandbox_command(action_text: str) -> str:
 
 
 def _execute_action_decision(action: ActionDecision, sandbox: Sandbox):
-    command = _format_sandbox_command(action.action)
+    text = (action.action or "").strip()
+    if text.startswith("do:"):
+        idea = text[3:].strip()
+        return {"detail": f"Simulated conceptual action: {idea}"}
+    command = _format_sandbox_command(text)
     return sandbox.run(command)
+
+
 
 
 def main(config_path: str):
@@ -77,7 +89,12 @@ def main(config_path: str):
     pool = []
 
     # Initialize sandbox once
-    sandbox = Sandbox(allowlist=["ls", "echo"])  # adjust allowlist as needed
+    sandbox = Sandbox(
+    allowlist=[
+        "ls", "echo", "cat", "python3", "pip", "mkdir", "touch"
+    ]
+)
+ # adjust allowlist as needed
 
     for cycle in range(cfg.runtime.cycles):
         log("cycle.start", id=cycle)
@@ -136,9 +153,36 @@ def main(config_path: str):
             result_summary = result
 
         iface.send_output(f"[cycle {cycle}] action={action} result={result_summary}")
-        log("cycle.end", id=cycle)
 
-    return 0
+        # ---- Stability Drift Check ----
+        try:
+            # equilibrium means (set to whatever you consider baseline)
+            muU, muR = 0.90, 0.10
+
+            # extract actual metrics if available; fall back to placeholders
+            try:
+                Ut = getattr(action, "utility_a", 0.9)
+                Rt = getattr(action, "risk_a", 0.1)
+            except Exception:
+                Ut, Rt = 0.9, 0.1
+
+            def compute_drift(Ut, Rt, muU, muR):
+                dU = abs(Ut - muU) / muU
+                dR = abs(Rt - muR) / muR
+                return max(dU, dR)
+
+            drift = compute_drift(Ut, Rt, muU, muR)
+            log("stability.check", drift=drift, util=Ut, risk=Rt)
+
+            if drift > 0.10:
+                log("stability.violation", drift=drift, cycle=cycle)
+                # optional: restore safe parameters or flag for re-learning
+                # alpha, tau = 1.2, 3.7
+        except Exception as e:
+            log("stability.error", error=str(e))
+        # ---- End Stability Drift Check ----
+
+        log("cycle.end", id=cycle)
 
 
 if __name__ == "__main__":

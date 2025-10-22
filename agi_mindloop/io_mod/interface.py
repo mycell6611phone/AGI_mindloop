@@ -41,6 +41,13 @@ class Interface:
             self._chat.grid(row=0, column=0, sticky="nsew")
             self._chat.configure(font=("TkDefaultFont", 20))
 
+            # Add context menu for cut/copy/paste
+            self._menu = tk.Menu(self._root, tearoff=0)
+            self._menu.add_command(label="Cut", command=lambda: self._chat.event_generate("<<Cut>>"))
+            self._menu.add_command(label="Copy", command=lambda: self._chat.event_generate("<<Copy>>"))
+            self._menu.add_command(label="Paste", command=lambda: self._chat.event_generate("<<Paste>>"))
+            self._chat.bind("<Button-3>", self._show_context_menu)
+
             self._entry_var = tk.StringVar()
 
             input_frame = tk.Frame(self._root)
@@ -144,16 +151,29 @@ class Interface:
         if self._headless or self._chat is None:
             return
 
-        assert self._chat is not None
         self._chat.configure(state="normal")
         label_tag = f"{role}_label"
         text_tag = f"{role}_text"
         self._chat.insert("end", f"{speaker}: ", label_tag)
         self._chat.insert("end", f"{message}\n", text_tag)
+
+        # Keep only the last two complete message blocks (user + MindLoop)
+        text = self._chat.get("1.0", "end-1c")
+        blocks = text.strip().split("\n")
+        if len(blocks) > 12:  # roughly allows two full exchanges
+            self._chat.delete("1.0", f"{len(blocks) - 12}.0")
+
         self._chat.configure(state="disabled")
         self._chat.see("end")
         if self._root is not None:
             self._root.update_idletasks()
+
+
+    def _show_context_menu(self, event):
+        try:
+            self._menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            self._menu.grab_release()
 
     def _on_send_event(self, event) -> None:  # type: ignore[override]
         self._on_send()
