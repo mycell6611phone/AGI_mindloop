@@ -13,6 +13,7 @@ def _format_recall(recall: str | List[str]) -> str:
         return "- " + "\n- ".join(recall[:10])
     return recall or "(none)"
 
+
 def make_plan(
     input_text: str,
     recall: str | list[str],
@@ -21,12 +22,37 @@ def make_plan(
     engine_b: Engine,
     gen: GenOptions,
 ) -> str:
+    """Generate a step plan, or if the input is a direct question,
+    answer it immediately and bypass later planning stages.
+    """
+    # -----------------------------
+    # Simple question detector
+    # -----------------------------
+    text = input_text.strip().lower()
+    question_triggers = (
+        "what", "who", "when", "where", "why", "how",
+        "is ", "are ", "can ", "could ", "should ", "would "
+    )
+    if text.endswith("?") or text.startswith(question_triggers):
+        # Direct-question bypass path
+        req = CompletionRequest(
+            system="You are a concise, helpful AI that answers questions directly and completely.",
+            user=input_text,
+        )
+        answer = engine_b.complete(req, gen)
+        # Tag for main loop so critic/decider skip it
+        return f"[direct-answer]\n{answer.strip()}"
+
+    # -----------------------------
+    # Normal planning path
+    # -----------------------------
     req = CompletionRequest(
         system=(persona_sys + "\n" + stage.system).strip(),
         user=stage.user.format(input=input_text, recall=_format_recall(recall)),
     )
     out = engine_b.complete(req, gen)
     return out.strip()
+
 
 def extract_actions(plan_text: str) -> List[str]:
     actions: List[str] = []

@@ -1,9 +1,15 @@
 from pathlib import Path
 from typing import Optional
+
 from agi_mindloop.config import load_config, GenDefaults
 from agi_mindloop.io_mod.interface import Interface
 from agi_mindloop.io_mod.telemetry import log
-from agi_mindloop.llm.engine import Gpt4AllAPIEngine, GenOptions
+from agi_mindloop.llm.engine import (
+    OpenAIEngine,
+    Gpt4AllAPIEngine,
+    StubEngine,
+    GenOptions,
+)
 from agi_mindloop.llm import EngineBundle
 from agi_mindloop.personas.persona import PersonaRegistry
 from agi_mindloop.prompts import PromptLoader
@@ -16,9 +22,20 @@ from agi_mindloop.action.debate import ActionDecision
 from agi_mindloop.memory.debate_gate import should_store
 from agi_mindloop.training.curate_debate import curate_if_needed
 
+# Optional long-term memory / debate modules
+try:
+    from agi_mindloop.memory_loop.memory import Memory  # type: ignore
+    from agi_mindloop.memory_loop.memory_logger import MemoryLogger  # type: ignore
+    from agi_mindloop.memory_loop.debate_core import Agent, DebateEngine, Candidate  # type: ignore
+except Exception:
+    try:
+        from agi_mindloop.memoryloop import Memory, MemoryLogger  # type: ignore
+        from agi_mindloop.memoryloop.debate_core import Agent, DebateEngine, Candidate  # type: ignore
+    except Exception:
+        Memory = MemoryLogger = Agent = DebateEngine = Candidate = None  # type: ignore
+
+
 def cli():
-    """CLI entry point wrapper for mindloop command"""
-    from pathlib import Path
     default_config = Path(__file__).resolve().parent.parent / "config" / "config.yaml"
     return main(str(default_config))
 
@@ -33,19 +50,57 @@ def _format_sandbox_command(action_text: str) -> str:
 
 
 def _execute_action_decision(action: ActionDecision, sandbox: Sandbox):
-    text = (action.action or "").strip()
-    if text.startswith("do:"):
-        idea = text[3:].strip()
-        return {"detail": f"Simulated conceptual action: {idea}"}
-    command = _format_sandbox_command(text)
-    return sandbox.run(command)
+    """
+    Execute an ActionDecision. Supports both conceptual "do:" actions and
+    concrete sandbox experiments via the `experiment:` prefix.
+    """
 
+    text = (action.action or "").strip().lower()
+    if not text:
+        return {"ok": False, "error": "empty action"}
+
+    # --------------------------------------------------------------
+    # Case 1: AGI conceptual experiment (e.g., do:Design experiment)
+    # --------------------------------------------------------------
+    if text.startswith("do:"):
+        task = text[3:].strip()
+
+        # New: treat "experiment" keyword as runnable task
+        if task.startswith("experiment"):
+            print(f"[Experimenter] Running experiment task: {task}")
+            cmd = f"sh: python3 experiments/{task.split('experiment',1)[1].strip()}.py"
+            result = sandbox.run(cmd)
+            return {
+                "detail": f"Experiment executed: {task}",
+                "result": result,
+            }
+
+        # Keep conceptual "do:" fallback for abstract tasks
+        return {"detail": f"Simulated conceptual action: {task}"}
+
+    # --------------------------------------------------------------
+    # Case 2: explicit shell command (e.g., sh: or !)
+    # --------------------------------------------------------------
+    if text.startswith(("sh:", "!")):
+        return sandbox.run(text)
+
+    # --------------------------------------------------------------
+    # Default
+    # --------------------------------------------------------------
+    return {"detail": f"No execution path for: {text}"}
 
 
 
 def main(config_path: str):
     cfg = load_config(config_path)
     iface = Interface()
+
+    # override config models with GUI selections
+    if not iface._headless:
+        cfg.models.neutral_a = iface.model_selections["neutral_a"].get()
+        cfg.models.mooded_b = iface.model_selections["mooded_b"].get()
+        cfg.models.summarizer = iface.model_selections["summarizer"].get()
+        cfg.models.coder = iface.model_selections["coder"].get()
 
     def _model_name(models: Optional[object], key: str) -> str:
         if not models:
@@ -61,11 +116,57 @@ def main(config_path: str):
             pass
         return str(value)
 
-    # Engines: talk to the locally running GPT4All server
-    engine_a = Gpt4AllAPIEngine(_model_name(getattr(cfg, "models", None), "neutral_a"))
-    engine_b = Gpt4AllAPIEngine(_model_name(getattr(cfg, "models", None), "mooded_b"))
-    engine_summarizer = Gpt4AllAPIEngine(_model_name(getattr(cfg, "models", None), "summarizer"))
-    engine_coder = Gpt4AllAPIEngine(_model_name(getattr(cfg, "models", None), "coder"))
+    # ------------------------------------------------------------------
+    # Engine factory: chooses correct backend dynamically
+    # ------------------------------------------------------------------
+    def _make_engine(model_key: str, cfg):
+        model_name = _model_name(getattr(cfg, "models", None), model_key)
+        engine_name = str(getattr(cfg, "engine", "gpt4all")).lower()
+
+        # allow prefix like openai:gpt-4.1
+        if ":" in model_name:
+            prefix, actual = model_name.split(":", 1)
+            engine_name = prefix
+            model_name = actual
+
+        if engine_name == "openai":
+            print(f"[Engine] Using OpenAI model: {model_name}")
+            return OpenAIEngine(model=model_name)
+        elif engine_name in {"gpt4all", "local"}:
+            print(f"[Engine] Using GPT4All local model: {model_name}")
+            return Gpt4AllAPIEngine(model=model_name)
+        elif engine_name == "ollama":
+            import ollama
+
+            print(f"[Engine] Using Ollama model: {model_name}")
+
+            class OllamaEngine:
+                def complete(self, req, gen):
+                    resp = ollama.chat(
+                        model=model_name,
+                        messages=[
+                            {"role": "system", "content": req.system},
+                            {"role": "user", "content": req.user},
+                        ],
+                    )
+                    return resp["message"]["content"]
+
+            return OllamaEngine()
+        elif engine_name == "stub":
+            print(f"[Engine] Using stub engine for {model_name}")
+            return StubEngine(model_name)
+        else:
+            print(f"[Engine] Unknown engine '{engine_name}', defaulting to GPT4All.")
+            return Gpt4AllAPIEngine(model=model_name)
+
+    # ------------------------------------------------------------------
+    # Engines (now dynamic)
+    # ------------------------------------------------------------------
+    engine_a = _make_engine("neutral_a", cfg)
+    engine_b = _make_engine("mooded_b", cfg)
+    engine_summarizer = _make_engine("summarizer", cfg)
+    engine_coder = _make_engine("coder", cfg)
+
     engines = EngineBundle(
         neutral_a=engine_a,
         mooded_b=engine_b,
@@ -88,105 +189,215 @@ def main(config_path: str):
     gen = GenOptions(**cfg.gen.__dict__)
     pool = []
 
-    # Initialize sandbox once
-    sandbox = Sandbox(
-    allowlist=[
-        "ls", "echo", "cat", "python3", "pip", "mkdir", "touch"
-    ]
-)
- # adjust allowlist as needed
+    sandbox = Sandbox(allowlist=["ls", "echo", "cat", "python3", "pip", "mkdir", "touch"])
 
-    for cycle in range(cfg.runtime.cycles):
-        log("cycle.start", id=cycle)
+    # --------- Optional Persistent Memory + Debate ----------
+    memory = None
+    logger = None
+    debate_engine = None
 
-        inp = iface.get_input()
-        recall = "(stub recall)"
-
-        # pass the StagePrompt object P_plan, not its .system/.user
-        plan = make_plan(inp, recall, persona.system_prompt, P_plan, engine_b, gen)
-
-        crit = critique(plan, persona.system_prompt, P_critic, engine_b, gen)
-
-        action = choose_action(
-            [f"do:{inp}"],
-            context=inp,
-            persona_sys=persona.system_prompt,
-            neutral_sys=neutral.system_prompt,
-            engines=engines,
-            gen=gen,
-            prompts=pl,
-            veto_risk=cfg.safety.veto_risk,
-        )
-
-        result = None
-        if isinstance(action, ActionDecision):
-            result = _execute_action_decision(action, sandbox)
-        elif isinstance(action, str) and action.strip():
-            result = sandbox.run(_format_sandbox_command(action))
-
-        expl = explain(inp, plan, crit, neutral.system_prompt, P_explain, engine_a, gen)
-
-        # memory gate (stub)
-        stored = should_store(
-            f"{inp}\n{plan}\n{crit}\n{result}",
-            neutral.system_prompt,
-            persona.system_prompt,
-            P_judge.system,
-            P_judge.user,
-            engine_a,
-            engine_b,
-            gen,
-            cfg.safety.veto_risk,
-        )
-        if stored:
-            pool.append(expl)
-
-        # training debate (stub)
-        curate_if_needed(pool)
-
-        result_summary = None
-        if isinstance(result, dict):
-            result_summary = result.get("stdout") or result.get("detail") or result.get("reason")
-            if result_summary is None:
-                result_summary = result
-        elif result is not None:
-            result_summary = result
-
-        iface.send_output(f"[cycle {cycle}] action={action} result={result_summary}")
-
-        # ---- Stability Drift Check ----
+    if Memory and getattr(cfg, "memoryloop", None) and getattr(cfg.memoryloop, "enabled", False):
         try:
-            # equilibrium means (set to whatever you consider baseline)
-            muU, muR = 0.90, 0.10
-
-            # extract actual metrics if available; fall back to placeholders
+            memory = Memory(cfg.memoryloop.db_path, cfg.memoryloop.index_path)
+            logger = MemoryLogger(cfg.memoryloop.log_path)
+            model_fn = None
             try:
-                Ut = getattr(action, "utility_a", 0.9)
-                Rt = getattr(action, "risk_a", 0.1)
+                import ollama
+
+                def _ollama_fn(messages):
+                    resp = ollama.chat(model="llama3", messages=messages)
+                    return resp["message"]["content"]
+
+                model_fn = _ollama_fn
             except Exception:
-                Ut, Rt = 0.9, 0.1
+                model_fn = None
 
-            def compute_drift(Ut, Rt, muU, muR):
-                dU = abs(Ut - muU) / muU
-                dR = abs(Rt - muR) / muR
-                return max(dU, dR)
+            if Agent and DebateEngine and model_fn is not None:
+                agent_a = Agent("Agent A", model_fn, mood="You are balanced and factual.")
+                agent_b = Agent("Agent B", model_fn, mood="You are critical and precise.")
+                debate_engine = DebateEngine(
+                    agent_a, agent_b, max_rounds=getattr(cfg.memoryloop, "rounds", 3), sleep=0.0
+                )
+        except Exception:
+            memory = logger = debate_engine = None
 
-            drift = compute_drift(Ut, Rt, muU, muR)
-            log("stability.check", drift=drift, util=Ut, risk=Rt)
+    # -----------------------------------------------------------------------
+    try:
+        for cycle in range(cfg.runtime.cycles):
+            log("cycle.start", id=cycle)
+            inp = iface.get_input()
 
-            if drift > 0.10:
-                log("stability.violation", drift=drift, cycle=cycle)
-                # optional: restore safe parameters or flag for re-learning
-                # alpha, tau = 1.2, 3.7
-        except Exception as e:
-            log("stability.error", error=str(e))
-        # ---- End Stability Drift Check ----
+            # Recall
+            if memory:
+                try:
+                    k = getattr(getattr(cfg, "memory", object()), "recall_k", 5)
+                    recalls = memory.recall_memories(inp, k=k)
+                    recall = "\n".join(m.content for m in recalls) if recalls else "(no relevant memories)"
+                except Exception:
+                    recall = "(stub recall)"
+            else:
+                recall = "(stub recall)"
 
-        log("cycle.end", id=cycle)
+            plan = make_plan(inp, recall, persona.system_prompt, P_plan, engine_b, gen)
+
+            if plan.startswith("[direct-answer]"):
+                iface.send_output(plan.split("]", 1)[1].strip())
+                continue  # skip critic/decider for this cycle
+
+
+            action = choose_action(
+                [f"do:{inp}"],
+                context=inp,
+                persona_sys=persona.system_prompt,
+                neutral_sys=neutral.system_prompt,
+                engines=engines,
+                gen=gen,
+                prompts=pl,
+                veto_risk=cfg.safety.veto_risk,
+            )
+
+            result = None
+            if isinstance(action, ActionDecision):
+                result = _execute_action_decision(action, sandbox)
+            elif isinstance(action, str) and action.strip():
+                result = sandbox.run(_format_sandbox_command(action))
+            try:
+               crit = critique(plan, persona.system_prompt, P_critic, engine_b, gen)
+               
+            except Exception as e:
+               print("[WARN] critique failed:", e)
+               crit = "(no critique)"
+
+            expl = explain(inp, plan, crit, neutral.system_prompt, P_explain, engine_a, gen)
+
+            stored = should_store(
+                f"{inp}\n{plan}\n{crit}\n{result}",
+                neutral.system_prompt,
+                persona.system_prompt,
+                P_judge.system,
+                P_judge.user,
+                engine_a,
+                engine_b,
+                gen,
+                cfg.safety.veto_risk,
+            )
+            if stored:
+                pool.append(expl)
+
+            curate_if_needed(pool)
+
+            result_summary = None
+            if isinstance(result, dict):
+                result_summary = result.get("stdout") or result.get("detail") or result.get("reason")
+                if result_summary is None:
+                    result_summary = result
+            elif result is not None:
+                result_summary = result
+
+            # -------------------------------------------------------------------------
+            # Final logic extension for accepted / rejected cycle results
+            # -------------------------------------------------------------------------
+            iface.send_output(f"[cycle {cycle}] action={action} result={result_summary}")
+
+            if result_summary:
+                text_result = str(result_summary).lower()
+
+                if "accept" in text_result or "accepted" in text_result:
+                    print(f"[Cycle {cycle}] Accepted outcome detected — performing refinement.")
+                    log("cycle.accepted", id=cycle)
+                    refinement = explain(
+                        "Refine previous reasoning",
+                        f"Improve and elaborate on this accepted output:\n{result_summary}",
+                        "",
+                        neutral.system_prompt,
+                        P_explain,
+                        engine_a,
+                        gen,
+                    )
+                    iface.send_output(f"[refinement] {refinement}")
+
+                    follow_action = choose_action(
+                        [f"do:{refinement}"],
+                        context=refinement,
+                        persona_sys=persona.system_prompt,
+                        neutral_sys=neutral.system_prompt,
+                        engines=engines,
+                        gen=gen,
+                        prompts=pl,
+                        veto_risk=cfg.safety.veto_risk,
+                    )
+                    iface.send_output(f"[follow-up action] {follow_action}")
+
+                elif "reject" in text_result or "rejected" in text_result:
+                    print(f"[Cycle {cycle}] Rejected outcome — retrying reasoning cycle.")
+                    log("cycle.rejected", id=cycle)
+                    retry_plan = make_plan(inp, recall, persona.system_prompt, P_plan, engine_b, gen)
+                    retry_critic = critique(retry_plan, persona.system_prompt, P_critic, engine_b, gen)
+                    retry_action = choose_action(
+                        [f"do:{inp}"],
+                        context=inp,
+                        persona_sys=persona.system_prompt,
+                        neutral_sys=neutral.system_prompt,
+                        engines=engines,
+                        gen=gen,
+                        prompts=pl,
+                        veto_risk=cfg.safety.veto_risk,
+                    )
+                    retry_result = None
+                    if isinstance(retry_action, ActionDecision):
+                        retry_result = _execute_action_decision(retry_action, sandbox)
+                    elif isinstance(retry_action, str) and retry_action.strip():
+                        retry_result = sandbox.run(_format_sandbox_command(retry_action))
+                    iface.send_output(f"[retry cycle {cycle}] retry_action={retry_action} result={retry_result}")
+                    log("cycle.retry.complete", id=cycle)
+                else:
+                    log("cycle.normal", id=cycle)
+
+            # --- Optional: debate+persistent storage ---
+            if debate_engine and logger and memory and result_summary is not None:
+                try:
+                    candidate = Candidate(str(cycle), str(result_summary))
+                    status = debate_engine.debate(candidate)
+                    logger.log("debate_result", {"id": candidate.id, "status": status}, "memoryloop")
+                    if status == "ACCEPTED":
+                        memory.add_memory(str(result_summary), {"type": "reflection"})
+                except Exception:
+                    pass
+
+            # ---- Stability Drift Check ----
+            try:
+                muU, muR = 0.90, 0.10
+                try:
+                    Ut = getattr(action, "utility_a", 0.9)
+                    Rt = getattr(action, "risk_a", 0.1)
+                except Exception:
+                    Ut, Rt = 0.9, 0.1
+
+                def compute_drift(Ut, Rt, muU, muR):
+                    dU = abs(Ut - muU) / muU
+                    dR = abs(Rt - muR) / muR
+                    return max(dU, dR)
+
+                drift = compute_drift(Ut, Rt, muU, muR)
+                log("stability.check", drift=drift, util=Ut, risk=Rt)
+
+                if drift > 0.10:
+                    log("stability.violation", drift=drift, cycle=cycle)
+            except Exception as e:
+                log("stability.error", error=str(e))
+
+            log("cycle.end", id=cycle)
+    finally:
+        try:
+            if memory:
+                memory.close()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
     import sys
+
     path = sys.argv[1] if len(sys.argv) > 1 else "config/config.yaml"
     raise SystemExit(main(path))
 

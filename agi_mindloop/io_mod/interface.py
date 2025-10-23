@@ -1,16 +1,15 @@
 from __future__ import annotations
-
 from pathlib import Path
 from typing import Optional
+import tkinter as tk
+from tkinter import ttk, filedialog, scrolledtext
 
 
 class Interface:
-    """Interactive interface backed by a Tkinter chat-style window.
-
-    The GUI is only initialised when a display is available; otherwise the
-    implementation gracefully falls back to the previous stub behaviour so
-    that automated tests or headless environments keep working.
+    """Interactive interface backed by a Tkinter chat-style window
+    with selectable LLM models for each role.
     """
+    
 
     def __init__(self) -> None:
         self._headless = False
@@ -23,36 +22,56 @@ class Interface:
         self._filedialog = None
 
         try:
-            import tkinter as tk
-            from tkinter import filedialog, scrolledtext
-
+                      
+# --- Create root window first ---
             self._root = tk.Tk()
             self._root.title("AGI MindLoop Chat")
-            self._root.geometry("720x520")
-            self._root.minsize(480, 360)
+            self._root.geometry("880x680")
+            self._root.minsize(700, 600)
+            # --- Global font scaling ---
+            self._root.option_add("*Font", "TkDefaultFont 20 bold")
+            self._root.option_add("*TButton.Font", "TkDefaultFont 20 bold")
+            self._root.option_add("*TLabel.Font", "TkDefaultFont 20 bold")
 
+            # --- Now that a root exists, create model selection variables ---
+            self.model_selections = {
+                "neutral_a": tk.StringVar(master=self._root, value="openai:gpt-4.1"),
+                "mooded_b": tk.StringVar(master=self._root, value="openai:gpt-4.1"),
+                "summarizer": tk.StringVar(master=self._root, value="openai:gpt-4.1"),
+                "coder": tk.StringVar(master=self._root, value="openai:gpt-4.1"),
+            }
+
+            # --- Dropdowns for model selection ---
+            model_frame = ttk.LabelFrame(self._root, text="Select Models")
+            model_frame.pack(fill="x", padx=10, pady=6)
+
+            models = [
+                "openai:gpt-4.1",
+                "openai:gpt-4-turbo",
+                "openai:gpt-o4-mini",
+                "gpt4all:reasonerv1",
+                "gpt4all:Llama 3.2 3B Instruct",
+                "gpt4all:Llama 3.1 8B Instruct 128k",
+                "ollama:llama3",
+                "stub",
+            ]
+
+            for key, var in self.model_selections.items():
+                ttk.Label(model_frame, text=f"{key}:").pack(side="left", padx=(5, 0))
+                menu = ttk.OptionMenu(model_frame, var, var.get(), *models)
+                menu.pack(side="left", padx=(0, 10))
+
+            # --- Chat window ---
             self._chat = scrolledtext.ScrolledText(
-                self._root,
-                state="disabled",
-                wrap="word",
-                padx=12,
-                pady=12,
+                self._root, state="disabled", wrap="word", padx=12, pady=12
             )
-            self._chat.grid(row=0, column=0, sticky="nsew")
+            self._chat.pack(fill="both", expand=True)
             self._chat.configure(font=("TkDefaultFont", 20))
 
-            # Add context menu for cut/copy/paste
-            self._menu = tk.Menu(self._root, tearoff=0)
-            self._menu.add_command(label="Cut", command=lambda: self._chat.event_generate("<<Cut>>"))
-            self._menu.add_command(label="Copy", command=lambda: self._chat.event_generate("<<Copy>>"))
-            self._menu.add_command(label="Paste", command=lambda: self._chat.event_generate("<<Paste>>"))
-            self._chat.bind("<Button-3>", self._show_context_menu)
-
+            # --- Input field ---
             self._entry_var = tk.StringVar()
-
             input_frame = tk.Frame(self._root)
-            input_frame.grid(row=1, column=0, sticky="ew", padx=12, pady=(0, 12))
-            input_frame.grid_columnconfigure(1, weight=1)
+            input_frame.pack(fill="x", padx=10, pady=(0, 10))
 
             attach_btn = tk.Button(
                 input_frame,
@@ -61,39 +80,21 @@ class Interface:
                 command=self._on_attach,
                 font=("TkDefaultFont", 20, "bold"),
             )
-            attach_btn.grid(row=0, column=0, padx=(0, 8))
+            
 
-            entry = tk.Entry(
-                input_frame, textvariable=self._entry_var, font=("TkDefaultFont", 20)
-            )
-            entry.grid(row=0, column=1, sticky="ew")
+            entry = tk.Entry(input_frame, textvariable=self._entry_var, font=("TkDefaultFont", 18))
+            entry.pack(side="left", fill="x", expand=True)
             entry.bind("<Return>", self._on_send_event)
 
-            send_btn = tk.Button(
-                input_frame,
-                text="Send",
-                command=self._on_send,
-                font=("TkDefaultFont", 20),
-            )
-            send_btn.grid(row=0, column=2, padx=(8, 0))
+            send_btn = tk.Button(input_frame, text="Send", command=self._on_send)
+            send_btn.pack(side="left", padx=5)
 
-            self._root.grid_rowconfigure(0, weight=1)
-            self._root.grid_columnconfigure(0, weight=1)
-
-            # Configure text styling for chat history.
-            label_font = ("TkDefaultFont", 20, "bold")
-            self._chat.tag_configure(
-                "user_label", foreground="#0b5394", font=label_font
-            )
-            self._chat.tag_configure(
-                "assistant_label", foreground="#38761d", font=label_font
-            )
-            self._chat.tag_configure(
-                "system_label", foreground="#666666", font=label_font
-            )
-            self._chat.tag_configure("user_text", foreground="#0b5394")
-            self._chat.tag_configure("assistant_text", foreground="#38761d")
-            self._chat.tag_configure("system_text", foreground="#666666")
+            # --- Context menu ---
+            self._menu = tk.Menu(self._root, tearoff=0)
+            self._menu.add_command(label="Cut", command=lambda: self._chat.event_generate("<<Cut>>"))
+            self._menu.add_command(label="Copy", command=lambda: self._chat.event_generate("<<Copy>>"))
+            self._menu.add_command(label="Paste", command=lambda: self._chat.event_generate("<<Paste>>"))
+            self._chat.bind("<Button-3>", self._show_context_menu)
 
             self._input_var = tk.StringVar(value="")
             self._filedialog = filedialog
@@ -102,32 +103,27 @@ class Interface:
             self._append_message("System", "Welcome to AGI MindLoop!", "system")
             entry.focus_set()
 
-        except Exception:
-            # Fall back to the stub behaviour when Tk cannot be initialised
-            # (e.g. running tests on a headless CI server).
-            self._headless = True
+        except Exception as e:
+               import traceback
+               print("Interface init failed:", e)
+               traceback.print_exc()
+               self._headless = True 
 
     # ------------------------------------------------------------------
-    # Public API used by the core loop
+    # Public API
     # ------------------------------------------------------------------
     def get_input(self) -> str:
         if self._headless:
             return "demo input"
-
         if self._closed:
             raise RuntimeError("Interface window has been closed by the user.")
-
         assert self._input_var is not None
 
-        # Reset the input variable so wait_variable blocks until new text.
         self._input_var.set("")
         self._pending_value = None
-
-        # Ensure the window is visible and focused for the user.
         self._root.deiconify()
         self._root.lift()
         self._root.after(0, lambda: self._root.focus_force())
-
         self._root.wait_variable(self._input_var)
 
         if self._closed:
@@ -138,15 +134,60 @@ class Interface:
         return value
 
     def send_output(self, text: str) -> None:
+        label, message, label_overridden = self._extract_label_and_message(text)
+
         if self._headless or self._closed:
-            print(text)
+            if not label_overridden:
+                print(text)
+            else:
+                print(f"{label}: {message}")
             return
 
-        self._append_message("MindLoop", text, "assistant")
+        # Color settings for MindLoop output
+        label_font = ("TkDefaultFont", 20, "bold")
+        self._chat.tag_configure("assistant_label", foreground="#38761d", font=label_font)
+        self._chat.tag_configure("assistant_text", foreground="#1E90FF")  # DodgerBlue
+
+        self._append_message(label, message, "assistant")
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+    def _extract_label_and_message(self, text: str) -> tuple[str, str, bool]:
+        """Extract optional 'Label: message' format for chat display."""
+        default_label = "MindLoop"
+        if not text:
+            return default_label, "", False
+
+        first_line, *rest = text.splitlines()
+        label = default_label
+
+        colon_index = first_line.find(":")
+        if colon_index != -1:
+            prefix = first_line[:colon_index].strip()
+            suffix = first_line[colon_index + 1:].lstrip()
+            if prefix and self._is_label_candidate(prefix):
+                label = prefix
+                body_lines: list[str] = []
+                if suffix:
+                    body_lines.append(suffix)
+                if rest:
+                    body_lines.extend(rest)
+                message = "\n".join(body_lines).strip()
+                return label, message, True
+
+        return label, text.strip(), False
+
+    @staticmethod
+    def _is_label_candidate(text: str) -> bool:
+        """Check if the prefix looks like a valid speaker label."""
+        if not text:
+            return False
+        for char in text:
+            if not (char.isalpha() or char.isspace() or char in {"-", "_"}):
+                return False
+        return True
+
     def _append_message(self, speaker: str, message: str, role: str) -> None:
         if self._headless or self._chat is None:
             return
@@ -168,14 +209,13 @@ class Interface:
         if self._root is not None:
             self._root.update_idletasks()
 
-
     def _show_context_menu(self, event):
         try:
             self._menu.tk_popup(event.x_root, event.y_root)
         finally:
             self._menu.grab_release()
 
-    def _on_send_event(self, event) -> None:  # type: ignore[override]
+    def _on_send_event(self, event) -> None:
         self._on_send()
         return "break"
 
@@ -202,7 +242,7 @@ class Interface:
         path = Path(filename)
         try:
             data = path.read_bytes()
-        except Exception as exc:  # pragma: no cover - GUI error reporting only
+        except Exception as exc:
             self._append_message(
                 "System", f"Failed to import '{path.name}': {exc}", "system"
             )
@@ -229,10 +269,8 @@ class Interface:
     def _on_close(self) -> None:
         if self._closed or self._headless:
             return
-
         self._closed = True
         if self._input_var is not None:
-            # Ensure wait_variable unblocks by updating the tracked variable.
             self._input_var.set("__CLOSED__")
         if self._root is not None:
             self._root.destroy()
@@ -242,14 +280,10 @@ class Interface:
     def _submit_text(self, text: str) -> None:
         if self._headless or self._closed:
             return
-
         text = text.strip()
         if not text:
             return
-
-        assert self._input_var is not None
         self._append_message("You", text, "user")
         self._pending_value = text
-        # Trigger wait_variable listeners.
         self._input_var.set(text)
 

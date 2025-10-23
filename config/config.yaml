@@ -31,8 +31,14 @@ prompts: {}             # can point to markdown prompt files if desired
 memory:
   faiss_path: ./data/vectors.faiss        # vector store
   sqlite_path: ./data/meta.sqlite3        # metadata store
-  recall_k: 8                             # number of nearest neighbors to recall
+  recall_k: 5                             # number of nearest neighbors to recall
   alpha: 0.7                              # blending weight between FAISS and FTS recall
+memoryloop:
+  enabled: false
+  db_path: "data/memory.db"
+  index_path: "data/faiss.index"
+  log_path: "logs/memory.jsonl"
+  rounds: 3
 
 safety:
   allowlist_tools: ["ls", "echo", "python3"]  # permitted sandbox commands
